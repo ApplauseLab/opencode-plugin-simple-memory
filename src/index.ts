@@ -1,7 +1,7 @@
 import { type Plugin, tool } from "@opencode-ai/plugin"
+import { homedir } from "node:os"
 
-const MEMORY_DIR = ".opencode/memory"
-
+const MEMORY_DIR = `${homedir()}/.config/opencode/memory`
 const getMemoryFile = () => {
   const date = new Date().toISOString().split("T")[0]
   return Bun.file(`${MEMORY_DIR}/${date}.logfmt`)
