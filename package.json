@@ -1,7 +1,7 @@
 {
   "name": "@knikolov/opencode-plugin-simple-memory",
   "module": "index.ts",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "Persistent project memory tools for OpenCode",
   "author": "knikolov",
   "repository": "https://github.com/cnicolov/opencode-plugin-simple-memory",
@@ -23,8 +23,10 @@
   ],
   "license": "MIT",
   "type": "module",
+  "dependencies": {
+    "@opencode-ai/plugin": "^1.0.153"
+  },
   "devDependencies": {
-    "@opencode-ai/plugin": "^1.0.153",
     "@types/bun": "latest"
   },
   "peerDependencies": {

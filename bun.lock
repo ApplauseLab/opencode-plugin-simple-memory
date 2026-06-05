@@ -4,8 +4,10 @@
   "workspaces": {
     "": {
       "name": "@knikolov/opencode-plugin-simple-memory",
-      "devDependencies": {
+      "dependencies": {
         "@opencode-ai/plugin": "^1.0.153",
+      },
+      "devDependencies": {
         "@types/bun": "latest",
       },
       "peerDependencies": {
