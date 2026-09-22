@@ -5,20 +5,41 @@
 
 A persistent memory plugin for [OpenCode](https://opencode.ai) that enables the AI assistant to remember context across sessions.
 
+## OpenCode compatibility
+
+Version 2.x of this plugin supports both OpenCode generations from one package:
+
+| OpenCode | Plugin version | Config form |
+|----------|----------------|-------------|
+| OpenCode 2 (V2) | `@knikolov/opencode-plugin-simple-memory@^2` | `plugins` (object form below) |
+| OpenCode 1 ≥ 1.18.29 | `@knikolov/opencode-plugin-simple-memory@^2` | `plugin` or `plugins` (legacy tuple form) |
+| OpenCode 1 < 1.18.29 | `@knikolov/opencode-plugin-simple-memory@^1` | `plugin` (legacy tuple form) |
+
+The package default-exports both entrypoints: OpenCode 2 reads the V2 `setup()` registration, OpenCode 1 calls the legacy `server()` function. Tool names, option names, and the storage format are identical across both, so existing configs, `AGENTS.md` guidance, and permission rules keep working.
+
+Memories live in `.opencode/memory/` as plain logfmt files. Installing, upgrading, or downgrading the plugin never touches them.
+
 ## Setup
 
-1. Add the plugin to your [OpenCode config](https://opencode.ai/docs/config/):
+Add the plugin to your [OpenCode config](https://opencode.ai/v2/docs/config/):
 
-   ```json
-   {
-     "$schema": "https://opencode.ai/config.json",
-     "plugin": ["@knikolov/opencode-plugin-simple-memory"]
-   }
-   ```
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugins": ["@knikolov/opencode-plugin-simple-memory"]
+}
+```
 
-2. Start using memory commands in your conversations.
+On OpenCode 1 the legacy tuple form still works:
 
-Memories are stored in `.opencode/memory/` as daily logfmt files. Existing logfmt files remain readable across plugin updates.
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": ["@knikolov/opencode-plugin-simple-memory"]
+}
+```
+
+Start using memory commands in your conversations.
 
 Automatic memory loading and saving are opt-in. When enabled, the plugin can load and save context automatically:
 
@@ -39,6 +60,14 @@ rm -rf ~/.cache/opencode/node_modules/@knikolov/opencode-plugin-simple-memory
 
 # Run OpenCode to trigger reinstall
 opencode
+```
+
+Clearing the cache installs the latest `2.x`. On OpenCode 1 older than 1.18.29, pin the plugin first so the reinstall does not break your setup:
+
+```json
+{
+  "plugins": ["@knikolov/opencode-plugin-simple-memory@^1"]
+}
 ```
 
 ## Tools
@@ -120,7 +149,7 @@ AI: [calls memory_forget with type="preference", scope="user",
 
 ## Automatic Context
 
-Automatic context loading is disabled by default. When `autoLoad` is enabled, the plugin uses OpenCode chat hooks to remember the latest user message, search active memories, and inject a compact block like this into system context:
+Automatic context loading is disabled by default. When `autoLoad` is enabled, the plugin uses OpenCode's prompt/system hooks (the V2 `prompt` and `context` session hooks, or the legacy V1 `chat.message` and `experimental.chat.system.transform` hooks) to remember the latest user message, search active memories, and inject a compact block like this into system context:
 
 ```md
 Relevant Memory:
@@ -136,7 +165,29 @@ remember that I prefer minimal diffs
 
 That request is stored as a `preference` memory in scope `user` with tag `auto`. Other explicit remember requests default to `context/user` unless they look like a decision, blocker, pattern, or preference.
 
-Configure the behavior through plugin options by using OpenCode's plugin tuple form. The first item is the package name and the second item is the options object passed to the plugin:
+Configure the behavior through plugin options in the V2 object form. The `options` object is passed to the plugin:
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugins": [
+    {
+      "package": "@knikolov/opencode-plugin-simple-memory",
+      "options": {
+        "autoLoad": true,
+        "autoSave": true,
+        "autoHookTimeoutMs": 100,
+        "contextLimit": 5,
+        "contextMaxChars": 1200,
+        "contextMinScore": 1,
+        "autoSaveScope": "user"
+      }
+    }
+  ]
+}
+```
+
+On OpenCode 1, the legacy tuple form passes the same options:
 
 ```json
 {
@@ -146,12 +197,7 @@ Configure the behavior through plugin options by using OpenCode's plugin tuple f
       "@knikolov/opencode-plugin-simple-memory",
       {
         "autoLoad": true,
-        "autoSave": true,
-        "autoHookTimeoutMs": 100,
-        "contextLimit": 5,
-        "contextMaxChars": 1200,
-        "contextMinScore": 1,
-        "autoSaveScope": "user"
+        "autoSave": true
       }
     ]
   ]
@@ -175,14 +221,14 @@ To keep automatic behavior disabled while retaining manual tools, omit options e
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": [
-    [
-      "@knikolov/opencode-plugin-simple-memory",
-      {
+  "plugins": [
+    {
+      "package": "@knikolov/opencode-plugin-simple-memory",
+      "options": {
         "autoLoad": false,
         "autoSave": false
       }
-    ]
+    }
   ]
 }
 ```
@@ -192,14 +238,14 @@ For local development, point OpenCode at the checkout with a `file://` URL and p
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": [
-    [
-      "file:///absolute/path/to/opencode-plugin-simple-memory/index.ts",
-      {
+  "plugins": [
+    {
+      "package": "file:///absolute/path/to/opencode-plugin-simple-memory",
+      "options": {
         "autoLoad": true,
         "autoSave": true
       }
-    ]
+    }
   ]
 }
 ```
@@ -253,7 +299,7 @@ Point your OpenCode config to the local checkout via a `file://` URL:
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["file:///absolute/path/to/opencode-plugin-simple-memory"]
+  "plugins": ["file:///absolute/path/to/opencode-plugin-simple-memory"]
 }
 ```
 

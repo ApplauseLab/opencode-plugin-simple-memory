@@ -1,4 +1,5 @@
-import { type Plugin, tool } from "@opencode-ai/plugin"
+import { Plugin } from "@opencode/plugin"
+import { tool, type PluginModule, type ToolDefinition } from "@opencode-ai/plugin"
 import { appendFile, mkdir, rename } from "node:fs/promises"
 import { join } from "node:path"
 
@@ -31,7 +32,9 @@ interface MemoryStore {
   rewriteFile(filepath: string, lines: string[]): Promise<void>
 }
 
-interface PluginOptions {
+// A type alias (not an interface) so plugin options passed as a plain
+// `Record<string, unknown>` by the V1 host convert cleanly.
+type PluginOptions = {
   autoLoad?: boolean
   autoSave?: boolean
   autoHookTimeoutMs?: number
@@ -725,24 +728,51 @@ const createTools = (store: MemoryStore) => {
   }
 }
 
-export const MemoryPlugin = (async (ctx, options?: PluginOptions) => {
-  const store = createStore(join(ctx.directory, ".opencode", "memory"))
+const SYSTEM_INSTRUCTION = "Use these memories only when they are relevant. Do not mention this block unless asked."
+
+// Hooks fail open: a timeout or a storage error must never block a response
+// (or, for the V2 prompt hook, prompt admission).
+const failOpen = async <T>(task: Promise<T>, timeoutMs: number): Promise<T | undefined> => {
+  try {
+    return await withTimeout(task, timeoutMs)
+  } catch {
+    return undefined
+  }
+}
+
+const jsonSchemaFromArgs = (args: ToolDefinition["args"]) => {
+  const { $schema, ...schema } = tool.schema.toJSONSchema(tool.schema.object(args))
+  return schema
+}
+
+interface MemoryRuntime {
+  tools: Record<string, ToolDefinition>
+  handlePromptText(text: string): Promise<void>
+  buildSystemBlock(): Promise<string | undefined>
+}
+
+/**
+ * Shared behavior for both entrypoints: the V2 `setup()` registrations and the
+ * legacy V1 `server()` hooks. Tool definitions are created once; the V2 tool
+ * registrations derive their JSON Schema from the V1 zod arg schemas, so both
+ * OpenCode versions expose the exact same tool surface.
+ */
+const createRuntime = (directory: string, options?: PluginOptions): MemoryRuntime => {
+  const store = createStore(join(directory, ".opencode", "memory"))
   const autoLoad = options?.autoLoad ?? false
   const autoSave = options?.autoSave ?? false
   const autoHookTimeoutMs = options?.autoHookTimeoutMs && options.autoHookTimeoutMs > 0 ? options.autoHookTimeoutMs : 100
   let latestPrompt: string | undefined
 
   return {
-    tool: createTools(store),
-    "chat.message": async (input, output) => {
-      const text = textFromParts(output.parts)
+    tools: createTools(store),
+
+    async handlePromptText(text) {
       if (!text) return
-
       latestPrompt = text
-
       if (!autoSave) return
 
-      await withTimeout((async () => {
+      await failOpen((async () => {
         const memory = inferExplicitMemory(text, options?.autoSaveScope || "user")
         if (!memory) return
 
@@ -752,25 +782,81 @@ export const MemoryPlugin = (async (ctx, options?: PluginOptions) => {
         })
       })(), autoHookTimeoutMs)
     },
-    "experimental.chat.system.transform": async (_input, output) => {
-      if (!autoLoad) return
 
-      if (!latestPrompt) return
+    async buildSystemBlock() {
+      if (!autoLoad) return undefined
+      if (!latestPrompt) return undefined
 
-      const pack = await withTimeout((async () => {
+      const prompt = latestPrompt
+      const pack = await failOpen((async () => {
         const memories = (await store.readEntries()).map((entry) => entry.memory)
         return buildContextPack(memories, {
-          query: latestPrompt,
+          query: prompt,
           limit: options?.contextLimit,
           maxChars: options?.contextMaxChars,
           minScore: options?.contextMinScore,
         })
       })(), autoHookTimeoutMs)
-      if (!pack) return
+      if (!pack) return undefined
 
-      output.system.push(`${pack}\n\nUse these memories only when they are relevant. Do not mention this block unless asked.`)
+      return `${pack}\n\n${SYSTEM_INSTRUCTION}`
     },
   }
-}) satisfies Plugin
+}
+
+/**
+ * Legacy OpenCode 1 entrypoint (object form supported since OpenCode 1.18.29).
+ * V1 calls `server()`; V2 reads `id`/`setup()` and ignores it.
+ */
+const server: PluginModule["server"] = async (input, options) => {
+  const runtime = createRuntime(input.directory, options as PluginOptions | undefined)
+
+  return {
+    tool: runtime.tools,
+    "chat.message": async (_input, output) => {
+      await runtime.handlePromptText(textFromParts(output.parts))
+    },
+    "experimental.chat.system.transform": async (_input, output) => {
+      const block = await runtime.buildSystemBlock()
+      if (block) output.system.push(block)
+    },
+  }
+}
+
+export const MemoryPlugin = {
+  ...Plugin.define({
+    id: "knikolov.simple-memory",
+    async setup(ctx) {
+      const runtime = createRuntime(ctx.location.directory, ctx.options)
+
+      await ctx.tool.transform((editor) => {
+        for (const [name, definition] of Object.entries(runtime.tools)) {
+          editor.add({
+            name,
+            description: definition.description,
+            input: jsonSchemaFromArgs(definition.args),
+            execute: async (input) => {
+              const result = await definition.execute(
+                input as Parameters<ToolDefinition["execute"]>[0],
+                {} as Parameters<ToolDefinition["execute"]>[1],
+              )
+              return { content: typeof result === "string" ? result : result.output }
+            },
+          })
+        }
+      })
+
+      await ctx.session.hook("prompt", async (event) => {
+        await runtime.handlePromptText(event.prompt.text)
+      })
+
+      await ctx.session.hook("context", async (event) => {
+        const block = await runtime.buildSystemBlock()
+        if (block) event.system.push({ type: "text", text: block })
+      })
+    },
+  }),
+  server,
+} satisfies ReturnType<typeof Plugin.define> & PluginModule
 
 export default MemoryPlugin
