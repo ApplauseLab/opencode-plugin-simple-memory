@@ -55,12 +55,18 @@ Automatic memory loading and saving are opt-in. When enabled, the plugin can loa
 To get the latest version, clear the cached plugin and let OpenCode reinstall it:
 
 ```bash
-# Remove the plugin from cache
+# Remove the plugin from cache (OpenCode 2)
+rm -rf ~/.cache/opencode/npm/@knikolov/opencode-plugin-simple-memory@* \
+       ~/.cache/opencode/packages/@knikolov/opencode-plugin-simple-memory*
+
+# OpenCode 1 kept plugin caches elsewhere
 rm -rf ~/.cache/opencode/node_modules/@knikolov/opencode-plugin-simple-memory
 
 # Run OpenCode to trigger reinstall
 opencode
 ```
+
+If the plugin shows as `failed` with `Plugin must export a default definition with an id and an effect or setup function`, a stale pre-2.0 copy is still cached: clear the cache as above and restart OpenCode. A failed activation state can stick to a project until OpenCode restarts.
 
 Clearing the cache installs the latest `2.x`. On OpenCode 1 older than 1.18.29, pin the plugin first so the reinstall does not break your setup:
 
